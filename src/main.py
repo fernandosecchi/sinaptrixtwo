@@ -1,27 +1,41 @@
+"""Main application entry point."""
 from fastapi import FastAPI
 from nicegui import ui
+from src.config import settings
+
+# Import UI pages
+from src.ui.pages.home import create_home_page
+from src.ui.pages.users_with_soft_delete import create_users_page
+from src.ui.pages.leads import create_leads_page
 
 # Initialize FastAPI app
-app = FastAPI(title="SinaptrixTwo", version="0.1.0")
+app = FastAPI(
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
+    description="A unified FastAPI + NiceGUI application",
+    debug=settings.DEBUG
+)
+
 
 @app.get("/health")
 def health_check():
-    """Health check endpoint."""
-    return {"status": "ok"}
+    """Health check endpoint for monitoring."""
+    return {"status": "ok", "service": "SinaptrixTwo"}
 
-# NiceGUI setup
+
 def init_nicegui():
-    @ui.page("/")
-    def main_page():
-        with ui.column().classes("w-full items-center justify-center min-h-screen bg-slate-100"):
-            with ui.card().classes("p-8 shadow-xl rounded-lg"):
-                ui.label("SinaptrixTwo").classes("text-4xl font-bold text-slate-800 mb-4")
-                ui.label("FastAPI + NiceGUI + PostgreSQL").classes("text-xl text-slate-600")
-                ui.button("Click me!", on_click=lambda: ui.notify("Hello from NiceGUI!")).classes("mt-6 bg-blue-500 text-white")
-
+    """Initialize NiceGUI and register all pages."""
+    # Register all UI pages
+    create_home_page()
+    create_leads_page()
+    create_users_page()
+    
     # Mount NiceGUI to FastAPI
-    # storage_secret must be set for sessions to work
-    ui.run_with(app, title="SinaptrixTwo", storage_secret="change-this-secret-in-production")
+    ui.run_with(
+        app,
+        title=settings.APP_NAME,
+        storage_secret=settings.STORAGE_SECRET
+    )
 
 init_nicegui()
 

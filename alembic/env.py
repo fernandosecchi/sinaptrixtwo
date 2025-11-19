@@ -12,7 +12,12 @@ from alembic import context
 # Add the src directory to the path so we can import the app's modules
 sys.path.append(os.path.join(os.path.dirname(__file__), "../src"))
 
-from database import Base, DATABASE_URL
+# Import database configuration
+from src.database import engine
+from src.config import settings
+
+# Import all models to register them with metadata
+from src.models import Base, User, Lead
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -23,8 +28,8 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Override sqlalchemy.url with the one from environment variables/database.py
-config.set_main_option("sqlalchemy.url", DATABASE_URL)
+# Override sqlalchemy.url with the one from settings
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
 # add your model's MetaData object here
 # for 'autogenerate' support

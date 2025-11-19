@@ -1,15 +1,14 @@
-import os
+"""Database configuration and session management."""
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import DeclarativeBase
-
-# Get database URL from environment variables
-# Fallback to a default for development if needed, but better to enforce env var
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/sinaptrixtwo")
+from src.config import settings
 
 # Create the async engine
 engine = create_async_engine(
-    DATABASE_URL,
-    echo=os.getenv("APP_ENV") == "development", # Log SQL in development
+    settings.DATABASE_URL,
+    echo=settings.DEBUG,  # Log SQL in development
+    pool_pre_ping=True,  # Verify connections before using
+    pool_size=10,  # Number of connections to maintain
+    max_overflow=20,  # Maximum overflow connections
 )
 
 # Create the async session factory
@@ -20,10 +19,6 @@ AsyncSessionLocal = async_sessionmaker(
     autoflush=False,
 )
 
-class Base(DeclarativeBase):
-    """Base class for all SQLAlchemy models."""
-    pass
-
 async def get_db():
     """Dependency to provide a database session."""
     async with AsyncSessionLocal() as session:
@@ -31,3 +26,13 @@ async def get_db():
             yield session
         finally:
             await session.close()
+
+async def init_db():
+    """Initialize database (create tables if they don't exist)."""
+    from src.models import Base
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+async def close_db():
+    """Close database connections."""
+    await engine.dispose()
