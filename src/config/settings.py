@@ -14,7 +14,7 @@ class Settings:
     )
     
     # Application
-    APP_NAME: str = "SinaptrixTwo"
+    APP_NAME: str = "SinaptrixOne"
     APP_VERSION: str = "0.1.0"
     APP_ENV: str = os.getenv("APP_ENV", "development")
     DEBUG: bool = APP_ENV == "development"

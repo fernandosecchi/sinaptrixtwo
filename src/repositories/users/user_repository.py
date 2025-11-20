@@ -3,7 +3,7 @@ from typing import Optional, List
 from datetime import datetime
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.models.user import User
+from src.models.auth.user import User
 from src.repositories.base import BaseRepository
 
 

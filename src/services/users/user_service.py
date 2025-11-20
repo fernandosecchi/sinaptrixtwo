@@ -1,8 +1,9 @@
 """User service for business logic operations."""
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.repositories.user_repository import UserRepository
-from src.models.user import User
+from src.repositories.users.user_repository import UserRepository
+from src.repositories.auth.role_repository import RoleRepository
+from src.models.auth.user import User
 
 
 class UserService:
@@ -11,6 +12,7 @@ class UserService:
     def __init__(self, session: AsyncSession):
         """Initialize user service with database session."""
         self.repository = UserRepository(session)
+        self.role_repository = RoleRepository(session)
     
     async def create_user(
         self,
@@ -139,3 +141,40 @@ class UserService:
             errors["email"] = "El email no puede tener más de 255 caracteres"
         
         return errors
+
+    async def assign_role(self, user_id: int, role_name: str) -> bool:
+        """Assign a role to a user."""
+        user = await self.repository.get(user_id)
+        if not user:
+            raise ValueError("Usuario no encontrado")
+            
+        role = await self.role_repository.get_by_name(role_name)
+        if not role:
+            raise ValueError(f"El rol '{role_name}' no existe")
+            
+        # Check if user already has the role
+        if any(r.name == role_name for r in user.roles):
+            return True
+            
+        user.roles.append(role)
+        await self.repository.session.commit()
+        return True
+
+    async def remove_role(self, user_id: int, role_name: str) -> bool:
+        """Remove a role from a user."""
+        user = await self.repository.get(user_id)
+        if not user:
+            raise ValueError("Usuario no encontrado")
+            
+        role = await self.role_repository.get_by_name(role_name)
+        if not role:
+            return False
+            
+        # Check if user has the role
+        user_role = next((r for r in user.roles if r.name == role_name), None)
+        if not user_role:
+            return False
+            
+        user.roles.remove(user_role)
+        await self.repository.session.commit()
+        return True

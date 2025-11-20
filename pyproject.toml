@@ -15,7 +15,10 @@ dependencies = [
     "asyncpg (>=0.30.0,<0.31.0)",
     "uvicorn (>=0.38.0,<0.39.0)",
     "pydantic (>=2.0.0,<3.0.0)",
-    "email-validator (>=2.0.0,<3.0.0)"
+    "email-validator (>=2.0.0,<3.0.0)",
+    "python-jose[cryptography] (>=3.3.0,<4.0.0)",
+    "passlib[bcrypt] (>=1.7.0,<2.0.0)",
+    "python-multipart (>=0.0.5,<1.0.0)"
 ]
 
 

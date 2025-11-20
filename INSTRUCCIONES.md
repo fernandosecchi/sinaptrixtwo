@@ -1,6 +1,6 @@
 # INSTRUCCIONES.md
 
-## 📋 Guía de Desarrollo - SinaptrixTwo
+## 📋 Guía de Desarrollo - SinaptrixOne
 
 ### 🚀 Inicio Rápido
 

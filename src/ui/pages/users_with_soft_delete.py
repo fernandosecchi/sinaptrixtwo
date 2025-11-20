@@ -1,378 +1,467 @@
-"""Users management page with soft delete support."""
+"""Users management page with soft delete and reusable components."""
 from datetime import datetime
-from typing import Optional
+from typing import List
 from nicegui import ui
+from sqlalchemy import select, update, or_
 from src.database import AsyncSessionLocal
-from src.services.user_service import UserService
+from src.models.auth.user import User
+from src.models.auth.role import Role
 from src.ui.layouts import theme_layout
+from src.ui.components import (
+    SearchBar,
+    DataTable,
+    TableColumn,
+    CrudDialog,
+    FormField,
+    DialogMode,
+    ConfirmDialog
+)
+from src.services.users.user_service import UserService
+from src.services.auth.role_service import RoleService
 
 
 def create_users_page():
-    """Register the users page route with soft delete functionality."""
-    
+    """Register the users management page with reusable components."""
+
     @ui.page("/usuarios")
-    async def usuarios_page():
-        with theme_layout('Gestión de Usuarios'):
-            with ui.column().classes('w-full max-w-7xl gap-4'):
-                # State management using a dictionary to store state
-                state = {'show_deleted': False}
-                
-                # Header with title and add button
-                with ui.row().classes('w-full items-center justify-between'):
-                    ui.label('Usuarios del Sistema').classes('text-3xl font-bold text-primary')
+    async def users_page():
+        breadcrumb_items = [
+            ('Gestión', '/'),
+            ('Usuarios', '/usuarios')
+        ]
+        with theme_layout('Usuarios', breadcrumb_items=breadcrumb_items):
+            with ui.column().classes('w-full gap-2'):
+                # Compact header with add and manage roles buttons
+                with ui.row().classes('w-full items-center justify-between mb-2'):
                     with ui.row().classes('gap-2'):
-                        deleted_switch = ui.switch('Mostrar eliminados')
-                        deleted_switch.on_value_change(lambda e: toggle_deleted_view(e.value))
-                        ui.button('Nuevo Usuario', on_click=lambda: show_user_dialog(), icon='person_add').props('color=primary')
-                
-                # Search bar
-                with ui.row().classes('w-full gap-4'):
-                    search_input = ui.input('Buscar usuarios...').props('outlined dense clearable').classes('flex-1')
-                    search_input.on('input', lambda: load_users())
-                
-                # Users table container
-                table_container = ui.column().classes('w-full')
-                
-                # User dialog for add/edit
-                user_dialog = ui.dialog()
-                with user_dialog, ui.card().classes('w-96'):
-                    dialog_title = ui.label('').classes('text-xl font-semibold')
-                    
-                    # Form inputs
+                        ui.button('Nuevo', on_click=lambda: user_dialog.open(DialogMode.CREATE), icon='add').props('size=sm color=primary')
+                        ui.button('Gestionar Roles', on_click=lambda: open_user_selector_for_roles(), icon='admin_panel_settings').props('size=sm color=secondary')
+
+                # Search bar component
+                async def search_users(search_term: str):
+                    await load_users(search_term, update_stats=False)
+
+                async def clear_search():
+                    await load_users(None, update_stats=False)
+
+                search_bar = SearchBar(
+                    placeholder="Buscar...",
+                    on_search=search_users,
+                    on_clear=clear_search,
+                    search_button_text='',  # Icon only
+                    clear_button_text=''     # Icon only
+                )
+
+                # Filter toggle and stats in same row
+                with ui.row().classes('w-full gap-2 items-center mb-2'):
+                    show_deleted = ui.switch('Eliminados').props('size=sm color=negative')
+                    show_deleted.on('change', lambda: load_users())
+
+                    ui.space()  # Push stats to the right
+
+                    # Minimal stats container
+                    stats_container = ui.row().classes('gap-2 items-center')
+
+                    # Refresh button
+                    ui.button(icon='refresh', on_click=lambda: load_users()).props('size=sm flat dense color=gray')
+
+                # Define save_user function before using it
+                async def save_user(data: dict, mode: DialogMode):
+                    """Save user using the dialog data."""
+                    try:
+                        async with AsyncSessionLocal() as session:
+                            if mode == DialogMode.CREATE:
+                                # Check if email already exists
+                                result = await session.execute(
+                                    select(User).where(User.email == data['email'])
+                                )
+                                if result.scalar_one_or_none():
+                                    ui.notify('El email ya está registrado', type='warning')
+                                    return
+
+                                new_user = User(
+                                    first_name=data['first_name'],
+                                    last_name=data['last_name'],
+                                    email=data['email']
+                                )
+                                session.add(new_user)
+                                message = f'Usuario {data["first_name"]} {data["last_name"]} creado exitosamente'
+                            else:  # EDIT mode
+                                stmt = (
+                                    update(User)
+                                    .where(User.id == data['id'])
+                                    .values(
+                                        first_name=data['first_name'],
+                                        last_name=data['last_name'],
+                                        email=data['email'],
+                                        updated_at=datetime.utcnow()
+                                    )
+                                )
+                                await session.execute(stmt)
+                                message = f'Usuario actualizado exitosamente'
+
+                            await session.commit()
+
+                        ui.notify(message, type='positive')
+                        await load_users()
+                    except Exception as e:
+                        ui.notify(f'Error: {e}', type='negative')
+
+                async def delete_user(data: dict):
+                    """Soft delete a user."""
+                    try:
+                        async with AsyncSessionLocal() as session:
+                            stmt = (
+                                update(User)
+                                .where(User.id == data['id'])
+                                .values(
+                                    deleted_at=datetime.utcnow(),
+                                    is_deleted=True
+                                )
+                            )
+                            await session.execute(stmt)
+                            await session.commit()
+                            ui.notify('Usuario eliminado exitosamente', type='info')
+                            await load_users()
+                    except Exception as e:
+                        ui.notify(f'Error: {e}', type='negative')
+
+                # Role management dialog
+                role_dialog = ui.dialog()
+                with role_dialog, ui.card().classes('w-[600px]'):
+                    role_dialog_title = ui.label('').classes('text-xl font-semibold mb-4')
+
+                    # Hidden user ID
+                    role_user_id = ui.input().props('hidden')
+
+                    # User info display
+                    user_info_label = ui.label('').classes('text-gray-600 mb-4')
+
                     ui.separator()
-                    with ui.column().classes('w-full gap-4 mt-4'):
-                        first_name_input = ui.input('Nombre *').props('outlined dense').classes('w-full')
-                        last_name_input = ui.input('Apellido *').props('outlined dense').classes('w-full')
-                        email_input = ui.input('Email *').props('outlined dense type=email').classes('w-full')
-                        
-                        # Hidden field to store user ID for editing
-                        user_id_input = ui.input().props('hidden')
-                    
-                    # Dialog actions
+
+                    # Current roles section
+                    ui.label('Roles Actuales').classes('text-lg font-medium mb-2')
+                    current_roles_container = ui.column().classes('w-full gap-2 mb-4')
+
+                    ui.separator()
+
+                    # Available roles section
+                    ui.label('Roles Disponibles').classes('text-lg font-medium mb-2')
+                    available_roles_container = ui.column().classes('w-full gap-2')
+
+                    # Actions
                     with ui.row().classes('w-full justify-end gap-2 mt-4'):
-                        ui.button('Cancelar', on_click=user_dialog.close).props('flat')
-                        
-                        async def save_user():
-                            # Validation
-                            if not first_name_input.value or not last_name_input.value or not email_input.value:
-                                ui.notify('Todos los campos marcados con * son requeridos', type='warning')
-                                return
-                            
-                            try:
-                                async with AsyncSessionLocal() as session:
-                                    service = UserService(session)
-                                    
-                                    if user_id_input.value:  # Edit mode
-                                        user = await service.update_user(
-                                            int(user_id_input.value),
-                                            first_name=first_name_input.value,
-                                            last_name=last_name_input.value,
-                                            email=email_input.value
-                                        )
-                                        if user:
-                                            ui.notify(f'Usuario actualizado exitosamente', type='positive')
-                                        else:
-                                            ui.notify('Error al actualizar usuario', type='negative')
-                                    else:  # Add mode
-                                        user = await service.create_user(
-                                            first_name=first_name_input.value,
-                                            last_name=last_name_input.value,
-                                            email=email_input.value
-                                        )
-                                        ui.notify(f'Usuario {first_name_input.value} {last_name_input.value} creado', type='positive')
-                                
-                                # Clear form and close dialog
-                                clear_form()
-                                user_dialog.close()
-                                await load_users()
-                                
-                            except ValueError as e:
-                                ui.notify(str(e), type='negative')
-                            except Exception as e:
-                                ui.notify(f'Error: {str(e)}', type='negative')
-                        
-                        save_button = ui.button('Guardar', on_click=save_user).props('color=primary')
-                
-                # View details dialog
-                details_dialog = ui.dialog()
-                with details_dialog, ui.card().classes('w-96'):
-                    ui.label('Detalles del Usuario').classes('text-xl font-semibold')
+                        ui.button('Cerrar', on_click=role_dialog.close).props('flat')
+
+                # User selector dialog for roles
+                user_selector_dialog = ui.dialog()
+                with user_selector_dialog, ui.card().classes('w-[500px]'):
+                    ui.label('Seleccionar Usuario para Gestionar Roles').classes('text-xl font-semibold mb-4')
                     ui.separator()
-                    details_container = ui.column().classes('w-full gap-3 mt-4')
-                    
-                    with ui.row().classes('w-full justify-end mt-4'):
-                        ui.button('Cerrar', on_click=details_dialog.close).props('color=primary')
-                
-                # Delete confirmation dialog
-                delete_dialog = ui.dialog()
-                with delete_dialog, ui.card():
-                    ui.label('¿Confirmar eliminación?').classes('text-lg font-semibold')
-                    delete_message = ui.label('').classes('mt-2')
-                    delete_type = {'value': 'soft'}  # 'soft' or 'hard'
-                    
-                    with ui.row().classes('gap-2 mt-4'):
-                        ui.button('Cancelar', on_click=delete_dialog.close).props('flat')
-                        
-                        async def confirm_delete():
-                            user_id = delete_dialog.user_id
+
+                    # User list container
+                    user_list_container = ui.column().classes('w-full gap-2 max-h-96 overflow-y-auto')
+
+                    # Actions
+                    with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                        ui.button('Cancelar', on_click=user_selector_dialog.close).props('flat')
+
+                async def open_user_selector_for_roles():
+                    """Open dialog to select a user for role management."""
+                    user_list_container.clear()
+
+                    async with AsyncSessionLocal() as session:
+                        stmt = select(User).where(User.deleted_at.is_(None))
+                        result = await session.execute(stmt)
+                        users = result.scalars().all()
+
+                    with user_list_container:
+                        for user in users:
+                            with ui.card().classes('w-full cursor-pointer hover:bg-cyan-50 transition-colors'):
+                                with ui.row().classes('w-full items-center justify-between'):
+                                    with ui.column().classes('gap-0'):
+                                        ui.label(f'{user.first_name} {user.last_name}').classes('font-medium')
+                                        ui.label(user.email).classes('text-sm text-gray-600')
+                                    ui.button(
+                                        'Gestionar Roles',
+                                        icon='settings',
+                                        on_click=lambda u=user: [
+                                            user_selector_dialog.close(),
+                                            manage_user_roles({
+                                                'id': u.id,
+                                                'first_name': u.first_name,
+                                                'last_name': u.last_name,
+                                                'email': u.email
+                                            })
+                                        ]
+                                    ).props('size=sm color=secondary')
+
+                    user_selector_dialog.open()
+
+                async def manage_user_roles(user_data):
+                    """Open dialog to manage user roles."""
+                    role_user_id.value = str(user_data['id'])
+                    role_dialog_title.text = 'Gestionar Roles de Usuario'
+                    user_info_label.text = f"Usuario: {user_data['first_name']} {user_data['last_name']} ({user_data['email']})"
+
+                    # Load current user roles and all available roles
+                    async with AsyncSessionLocal() as session:
+                        user_service = UserService(session)
+                        role_service = RoleService(session)
+
+                        # Get user with roles
+                        user = await user_service.get_user(user_data['id'])
+                        all_roles = await role_service.get_all_roles()
+
+                        # Get current role names
+                        current_role_names = [r.name for r in user.roles] if user.roles else []
+
+                    # Clear and populate current roles
+                    current_roles_container.clear()
+                    with current_roles_container:
+                        if current_role_names:
+                            for role_name in current_role_names:
+                                with ui.row().classes('items-center gap-2'):
+                                    ui.chip(role_name, icon='verified_user').props('color=primary')
+                                    ui.button(
+                                        icon='remove_circle',
+                                        on_click=lambda r=role_name: remove_role_from_user(user_data['id'], r)
+                                    ).props('flat round dense color=negative').tooltip('Quitar rol')
+                        else:
+                            ui.label('Sin roles asignados').classes('text-gray-500 italic')
+
+                    # Clear and populate available roles
+                    available_roles_container.clear()
+                    with available_roles_container:
+                        available_count = 0
+                        for role in all_roles:
+                            if role.name not in current_role_names:
+                                available_count += 1
+                                with ui.row().classes('items-center gap-2'):
+                                    ui.chip(role.name, icon='badge').props('outline')
+                                    ui.label(f'({len(role.permissions)} permisos)').classes('text-sm text-gray-500')
+                                    ui.button(
+                                        icon='add_circle',
+                                        on_click=lambda r=role.name: add_role_to_user(user_data['id'], r)
+                                    ).props('flat round dense color=positive').tooltip('Asignar rol')
+
+                        if available_count == 0:
+                            ui.label('Todos los roles ya están asignados').classes('text-gray-500 italic')
+
+                    role_dialog.open()
+
+                async def add_role_to_user(user_id: int, role_name: str):
+                    """Add a role to a user."""
+                    try:
+                        async with AsyncSessionLocal() as session:
+                            user_service = UserService(session)
+                            await user_service.assign_role(user_id, role_name)
+
+                        ui.notify(f'Rol {role_name} asignado exitosamente', type='positive')
+
+                        # Refresh the dialog
+                        role_dialog.close()
+                        # Reload user data and reopen dialog
+                        user_row = {'id': user_id}
+                        async with AsyncSessionLocal() as session:
+                            user = await session.get(User, user_id)
+                            user_row.update({
+                                'first_name': user.first_name,
+                                'last_name': user.last_name,
+                                'email': user.email
+                            })
+                        await manage_user_roles(user_row)
+
+                    except Exception as e:
+                        ui.notify(f'Error al asignar rol: {str(e)}', type='negative')
+
+                async def remove_role_from_user(user_id: int, role_name: str):
+                    """Remove a role from a user."""
+                    try:
+                        async with AsyncSessionLocal() as session:
+                            user_service = UserService(session)
+                            await user_service.remove_role(user_id, role_name)
+
+                        ui.notify(f'Rol {role_name} removido exitosamente', type='info')
+
+                        # Refresh the dialog
+                        role_dialog.close()
+                        # Reload user data and reopen dialog
+                        user_row = {'id': user_id}
+                        async with AsyncSessionLocal() as session:
+                            user = await session.get(User, user_id)
+                            user_row.update({
+                                'first_name': user.first_name,
+                                'last_name': user.last_name,
+                                'email': user.email
+                            })
+                        await manage_user_roles(user_row)
+
+                    except Exception as e:
+                        ui.notify(f'Error al remover rol: {str(e)}', type='negative')
+
+                # Create user dialog after defining the functions
+                user_dialog = CrudDialog(
+                    title="Usuario",
+                    fields=[
+                        FormField('first_name', 'Nombre', required=True, full_width=False),
+                        FormField('last_name', 'Apellido', required=True, full_width=False),
+                        FormField('email', 'Email', field_type='email', required=True)
+                    ],
+                    on_save=save_user,
+                    on_delete=delete_user,
+                    width='w-[500px]'
+                )
+
+                # Data table with columns
+                columns = [
+                    TableColumn('id', 'ID', 'id'),
+                    TableColumn('first_name', 'Nombre', 'first_name'),
+                    TableColumn('last_name', 'Apellido', 'last_name'),
+                    TableColumn('email', 'Email', 'email'),
+                    TableColumn('is_active', 'Estado', 'is_active', format_fn=lambda x: 'Activo' if x else 'Inactivo'),
+                    TableColumn('created_at', 'Creado', 'created_at', format_fn=lambda x: x.strftime("%d/%m/%Y") if x else ''),
+                ]
+
+                # Create table without custom_actions (not supported)
+                data_table = DataTable(
+                    title="",
+                    columns=columns,
+                    rows_per_page=10,
+                    on_view=lambda row: view_user(row),
+                    on_edit=lambda row: edit_user(row),
+                    on_delete=lambda row: confirm_delete(row),
+                    searchable_fields=['first_name', 'last_name', 'email'],
+                    show_stats=False
+                )
+
+                def view_user(row):
+                    """View user details."""
+                    user_dialog.open(DialogMode.VIEW, row)
+
+                def edit_user(row):
+                    """Edit user."""
+                    user_dialog.open(DialogMode.EDIT, row)
+
+                def confirm_delete(row):
+                    """Confirm user deletion."""
+                    if row.get('deleted_at'):
+                        async def restore_user():
                             try:
                                 async with AsyncSessionLocal() as session:
-                                    service = UserService(session)
-                                    
-                                    if delete_type['value'] == 'hard':
-                                        success = await service.hard_delete_user(user_id)
-                                        message = 'Usuario eliminado permanentemente'
-                                    else:
-                                        success = await service.delete_user(user_id)
-                                        message = 'Usuario eliminado exitosamente'
-                                    
-                                    if success:
-                                        ui.notify(message, type='info')
-                                    else:
-                                        ui.notify('Error al eliminar usuario', type='negative')
-                                    
-                                delete_dialog.close()
-                                await load_users()
+                                    stmt = (
+                                        update(User)
+                                        .where(User.id == row['id'])
+                                        .values(
+                                            deleted_at=None,
+                                            is_deleted=False
+                                        )
+                                    )
+                                    await session.execute(stmt)
+                                    await session.commit()
+                                    ui.notify('Usuario restaurado exitosamente', type='positive')
+                                    await load_users()
                             except Exception as e:
-                                ui.notify(f'Error al eliminar: {str(e)}', type='negative')
-                        
-                        delete_button = ui.button('Eliminar', on_click=confirm_delete).props('color=negative')
-                
-                def clear_form():
-                    """Clear all form inputs."""
-                    first_name_input.value = ''
-                    last_name_input.value = ''
-                    email_input.value = ''
-                    user_id_input.value = ''
-                
-                def show_user_dialog(user=None):
-                    """Show the user dialog for adding or editing."""
-                    clear_form()
-                    if user:
-                        # Edit mode
-                        dialog_title.text = 'Editar Usuario'
-                        user_id_input.value = str(user.id)
-                        first_name_input.value = user.first_name
-                        last_name_input.value = user.last_name
-                        email_input.value = user.email
+                                ui.notify(f'Error: {e}', type='negative')
+
+                        ConfirmDialog.ask(
+                            title='Restaurar Usuario',
+                            message=f'¿Deseas restaurar al usuario {row["first_name"]} {row["last_name"]}?',
+                            on_confirm=restore_user,
+                            confirm_text='Restaurar',
+                            confirm_color='positive'
+                        )
                     else:
-                        # Add mode
-                        dialog_title.text = 'Nuevo Usuario'
-                    user_dialog.open()
-                
-                def show_details(user):
-                    """Show user details in a dialog."""
-                    details_container.clear()
-                    with details_container:
-                        # ID and Name
-                        with ui.row().classes('w-full gap-2'):
-                            ui.label('ID:').classes('font-bold')
-                            ui.label(str(user.id))
-                        
-                        with ui.row().classes('w-full gap-2'):
-                            ui.label('Nombre completo:').classes('font-bold')
-                            ui.label(f"{user.first_name} {user.last_name}")
-                        
-                        with ui.row().classes('w-full gap-2'):
-                            ui.label('Email:').classes('font-bold')
-                            ui.label(user.email)
-                        
-                        with ui.row().classes('w-full gap-2'):
-                            ui.label('Fecha de registro:').classes('font-bold')
-                            ui.label(user.created_at.strftime('%d/%m/%Y %H:%M'))
-                        
-                        if user.updated_at:
-                            with ui.row().classes('w-full gap-2'):
-                                ui.label('Última modificación:').classes('font-bold')
-                                ui.label(user.updated_at.strftime('%d/%m/%Y %H:%M'))
-                        
-                        if user.deleted_at:
-                            with ui.row().classes('w-full gap-2'):
-                                ui.label('Fecha de eliminación:').classes('font-bold')
-                                ui.label(user.deleted_at.strftime('%d/%m/%Y %H:%M'))
-                        
-                        with ui.row().classes('w-full gap-2'):
-                            ui.label('Estado:').classes('font-bold')
-                            if user.is_deleted:
-                                ui.label('Eliminado').classes('text-red-500')
-                            else:
-                                ui.label('Activo').classes('text-green-500')
-                    
-                    details_dialog.open()
-                
-                def show_delete_confirmation(user, hard=False):
-                    """Show delete confirmation dialog."""
-                    delete_dialog.user_id = user.id
-                    delete_type['value'] = 'hard' if hard else 'soft'
-                    
-                    if hard:
-                        delete_message.text = f"¿Estás seguro de que deseas eliminar PERMANENTEMENTE al usuario {user.first_name} {user.last_name}? Esta acción no se puede deshacer."
-                        delete_button.text = 'Eliminar Permanentemente'
-                        delete_button.props('color=negative')
-                    else:
-                        delete_message.text = f"¿Estás seguro de que deseas eliminar al usuario {user.first_name} {user.last_name}?"
-                        delete_button.text = 'Eliminar'
-                        delete_button.props('color=warning')
-                    
-                    delete_dialog.open()
-                
-                async def restore_user(user_id):
-                    """Restore a soft-deleted user."""
+                        ConfirmDialog.ask(
+                            title='Eliminar Usuario',
+                            message=f'¿Estás seguro de eliminar al usuario {row["first_name"]} {row["last_name"]}?',
+                            on_confirm=lambda: delete_user(row),
+                            confirm_color='negative',
+                            icon='warning',
+                            icon_color='red'
+                        )
+
+                async def load_stats():
+                    """Load and display minimal user statistics."""
                     try:
                         async with AsyncSessionLocal() as session:
-                            service = UserService(session)
-                            success = await service.restore_user(user_id)
-                            if success:
-                                ui.notify('Usuario restaurado exitosamente', type='positive')
-                                await load_users()
-                            else:
-                                ui.notify('Error al restaurar usuario', type='negative')
+                            # Get all users
+                            result = await session.execute(select(User))
+                            all_users = result.scalars().all()
+
+                            # Calculate stats
+                            total = len(all_users)
+                            active = sum(1 for u in all_users if u.is_active and not u.deleted_at)
+                            inactive = sum(1 for u in all_users if not u.is_active and not u.deleted_at)
+                            deleted = sum(1 for u in all_users if u.deleted_at)
+
+                            # Clear and recreate minimal stats
+                            stats_container.clear()
+
+                            with stats_container:
+                                # Ultra compact stats - just numbers with tooltips
+                                ui.label(f'{total}').classes('text-xs text-gray-600').tooltip('Total')
+                                ui.label('•').classes('text-gray-400')
+                                ui.label(f'{active}').classes('text-xs text-green-600').tooltip('Activos')
+                                ui.label('•').classes('text-gray-400')
+                                ui.label(f'{inactive}').classes('text-xs text-orange-600').tooltip('Inactivos')
+                                ui.label('•').classes('text-gray-400')
+                                ui.label(f'{deleted}').classes('text-xs text-red-600').tooltip('Eliminados')
+
                     except Exception as e:
-                        ui.notify(f'Error: {str(e)}', type='negative')
-                
-                async def load_users():
+                        ui.notify(f'Error al cargar estadísticas: {e}', type='negative')
+
+                async def load_users(search_term: str = None, update_stats: bool = True):
                     """Load and display users in the table."""
-                    table_container.clear()
-                    
+                    # Only update stats on initial load or explicit request
+                    if update_stats:
+                        await load_stats()
+
                     try:
                         async with AsyncSessionLocal() as session:
-                            service = UserService(session)
-                            
-                            # Get users based on current view mode
-                            if state['show_deleted']:
-                                users = await service.get_deleted_users()
-                                title_text = 'Usuarios Eliminados'
+                            # Create base query
+                            query = select(User)
+
+                            # Apply deleted filter
+                            if show_deleted.value:
+                                query = query.where(User.deleted_at.is_not(None))
                             else:
-                                if search_input.value:
-                                    users = await service.search_users(search_input.value, include_deleted=False)
-                                else:
-                                    users = await service.get_all_users(include_deleted=False)
-                                title_text = 'Usuarios Activos'
-                        
-                        if not users:
-                            with table_container:
-                                with ui.card().classes('w-full p-8 text-center'):
-                                    ui.icon('person_off', size='xl').classes('text-gray-400')
-                                    if state['show_deleted']:
-                                        ui.label('No hay usuarios eliminados').classes('text-gray-500 text-lg mt-2')
-                                    else:
-                                        ui.label('No se encontraron usuarios').classes('text-gray-500 text-lg mt-2')
-                                        if search_input.value:
-                                            ui.label('Intenta con otros términos de búsqueda').classes('text-gray-400 text-sm')
-                        else:
-                            with table_container:
-                                # Stats card
-                                with ui.card().classes('w-full p-4 mb-4'):
-                                    with ui.row().classes('gap-8'):
-                                        ui.label(f'{title_text}: {len(users)}').classes('text-lg')
-                                        if search_input.value and not state['show_deleted']:
-                                            ui.label(f'Resultados filtrados').classes('text-sm text-gray-500')
-                                
-                                # Users table
-                                columns = [
-                                    {'name': 'id', 'label': 'ID', 'field': 'id', 'sortable': True, 'align': 'left'},
-                                    {'name': 'first_name', 'label': 'Nombre', 'field': 'first_name', 'sortable': True, 'align': 'left'},
-                                    {'name': 'last_name', 'label': 'Apellido', 'field': 'last_name', 'sortable': True, 'align': 'left'},
-                                    {'name': 'email', 'label': 'Email', 'field': 'email', 'sortable': True, 'align': 'left'},
-                                ]
-                                
-                                if state['show_deleted']:
-                                    columns.append({'name': 'deleted_at', 'label': 'Fecha Eliminación', 'field': 'deleted_at', 'sortable': True, 'align': 'left'})
-                                else:
-                                    columns.append({'name': 'created_at', 'label': 'Fecha Registro', 'field': 'created_at', 'sortable': True, 'align': 'left'})
-                                
-                                columns.append({'name': 'actions', 'label': 'Acciones', 'field': 'actions', 'align': 'center'})
-                                
-                                rows = []
-                                for user in users:
-                                    row = {
-                                        'id': user.id,
-                                        'first_name': user.first_name,
-                                        'last_name': user.last_name,
-                                        'email': user.email,
-                                    }
-                                    
-                                    if state['show_deleted'] and user.deleted_at:
-                                        row['deleted_at'] = user.deleted_at.strftime('%d/%m/%Y %H:%M')
-                                    else:
-                                        row['created_at'] = user.created_at.strftime('%d/%m/%Y %H:%M')
-                                    
-                                    rows.append(row)
-                                
-                                table = ui.table(
-                                    columns=columns,
-                                    rows=rows,
-                                    row_key='id',
-                                    title=title_text,
-                                    pagination={'rowsPerPage': 10, 'sortBy': 'deleted_at' if state['show_deleted'] else 'created_at', 'descending': True}
-                                ).classes('w-full')
-                                
-                                # Custom actions slot based on view mode
-                                if state['show_deleted']:
-                                    # Actions for deleted users: view, restore, permanent delete
-                                    table.add_slot('body-cell-actions', r'''
-                                        <q-td :props="props" class="text-center">
-                                            <q-btn @click="$parent.$emit('view', props.row)" icon="visibility" 
-                                                   color="info" flat dense round size="sm">
-                                                <q-tooltip>Ver detalles</q-tooltip>
-                                            </q-btn>
-                                            <q-btn @click="$parent.$emit('restore', props.row)" icon="restore" 
-                                                   color="positive" flat dense round size="sm" class="q-ml-sm">
-                                                <q-tooltip>Restaurar</q-tooltip>
-                                            </q-btn>
-                                            <q-btn @click="$parent.$emit('hard_delete', props.row)" icon="delete_forever" 
-                                                   color="negative" flat dense round size="sm" class="q-ml-sm">
-                                                <q-tooltip>Eliminar permanentemente</q-tooltip>
-                                            </q-btn>
-                                        </q-td>
-                                    ''')
-                                    
-                                    # Event handlers for deleted users
-                                    table.on('view', lambda e: show_details(next(u for u in users if u.id == e.args['id'])))
-                                    table.on('restore', lambda e: restore_user(e.args['id']))
-                                    table.on('hard_delete', lambda e: show_delete_confirmation(
-                                        next(u for u in users if u.id == e.args['id']), hard=True
-                                    ))
-                                else:
-                                    # Actions for active users: view, edit, soft delete
-                                    table.add_slot('body-cell-actions', r'''
-                                        <q-td :props="props" class="text-center">
-                                            <q-btn @click="$parent.$emit('view', props.row)" icon="visibility" 
-                                                   color="info" flat dense round size="sm">
-                                                <q-tooltip>Ver detalles</q-tooltip>
-                                            </q-btn>
-                                            <q-btn @click="$parent.$emit('edit', props.row)" icon="edit" 
-                                                   color="warning" flat dense round size="sm" class="q-ml-sm">
-                                                <q-tooltip>Editar</q-tooltip>
-                                            </q-btn>
-                                            <q-btn @click="$parent.$emit('delete', props.row)" icon="delete" 
-                                                   color="negative" flat dense round size="sm" class="q-ml-sm">
-                                                <q-tooltip>Eliminar</q-tooltip>
-                                            </q-btn>
-                                        </q-td>
-                                    ''')
-                                    
-                                    # Event handlers for active users
-                                    table.on('view', lambda e: show_details(next(u for u in users if u.id == e.args['id'])))
-                                    table.on('edit', lambda e: show_user_dialog(next(u for u in users if u.id == e.args['id'])))
-                                    table.on('delete', lambda e: show_delete_confirmation(
-                                        next(u for u in users if u.id == e.args['id']), hard=False
-                                    ))
-                    
+                                query = query.where(User.deleted_at.is_(None))
+
+                            # Apply search filter if present
+                            if search_term:
+                                search_pattern = f"%{search_term}%"
+                                query = query.where(
+                                    or_(
+                                        User.first_name.ilike(search_pattern),
+                                        User.last_name.ilike(search_pattern),
+                                        User.email.ilike(search_pattern)
+                                    )
+                                )
+
+                            # Execute query
+                            result = await session.execute(query.order_by(User.created_at.desc()))
+                            users = result.scalars().all()
+
+                            # Convert to dict for table
+                            users_data = []
+                            for user in users:
+                                users_data.append({
+                                    'id': user.id,
+                                    'first_name': user.first_name,
+                                    'last_name': user.last_name,
+                                    'email': user.email,
+                                    'is_active': user.is_active,
+                                    'created_at': user.created_at,
+                                    'updated_at': user.updated_at,
+                                    'deleted_at': user.deleted_at
+                                })
+
+                            # Load data into table
+                            data_table.load_data(users_data)
+
                     except Exception as e:
-                        with table_container:
-                            with ui.card().classes('w-full p-4 bg-red-50'):
-                                ui.label(f'Error al cargar usuarios: {str(e)}').classes('text-red-600')
-                
-                # Load users initially
+                        ui.notify(f'Error al cargar usuarios: {e}', type='negative')
+
+                # Load initial data
                 await load_users()
-                
-                # Function to toggle deleted view
-                def toggle_deleted_view(value):
-                    state['show_deleted'] = value
-                    load_users()
-                
-                # Footer with refresh button
-                with ui.row().classes('w-full justify-between mt-4'):
-                    ui.label('Última actualización: ' + datetime.now().strftime('%H:%M:%S')).classes('text-gray-500')
-                    ui.button('Actualizar', on_click=load_users, icon='refresh').props('flat color=primary')

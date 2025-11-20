@@ -1,4 +1,4 @@
-# SinaptrixTwo
+# SinaptrixOne
 
 A unified FastAPI + NiceGUI application with PostgreSQL, managed by Poetry and Docker.
 

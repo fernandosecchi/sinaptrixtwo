@@ -2,10 +2,10 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.repositories.lead_repository import LeadRepository
-from src.models.lead import Lead
+from src.repositories.leads.lead_repository import LeadRepository
+from src.models.leads.lead import Lead
 from src.models.enums import LeadStatus, LeadSource
-from src.schemas.lead import LeadCreate, LeadUpdate, LeadStatistics
+from src.schemas.leads.lead import LeadCreate, LeadUpdate, LeadStatistics
 
 
 class LeadService:

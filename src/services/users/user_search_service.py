@@ -2,8 +2,8 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime, date, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.repositories.user_search_repository import UserSearchRepository
-from src.models.user import User
+from src.repositories.users.user_search_repository import UserSearchRepository
+from src.models.auth.user import User
 
 
 class UserSearchService:

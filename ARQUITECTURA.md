@@ -1,4 +1,4 @@
-# 🏗️ Arquitectura de SinaptrixTwo
+# 🏗️ Arquitectura de SinaptrixOne
 
 ## 📁 Estructura del Proyecto
 

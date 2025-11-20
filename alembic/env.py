@@ -17,7 +17,7 @@ from src.database import engine
 from src.config import settings
 
 # Import all models to register them with metadata
-from src.models import Base, User, Lead
+from src.models import Base, User, Lead, Role, Permission, RefreshToken, Country, State, City, Empresa, Servidor
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

@@ -1,5 +1,5 @@
 """Schemas package for data validation and serialization."""
-from src.schemas.user import (
+from src.schemas.users.user import (
     UserBase,
     UserCreate,
     UserUpdate,
@@ -7,7 +7,7 @@ from src.schemas.user import (
     UserResponse,
     UserList
 )
-from src.schemas.lead import (
+from src.schemas.leads.lead import (
     LeadBase,
     LeadCreate,
     LeadUpdate,

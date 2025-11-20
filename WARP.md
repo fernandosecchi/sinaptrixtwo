@@ -4,7 +4,7 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 ## Project Overview
 
-SinaptrixTwo is a unified FastAPI + NiceGUI application that integrates a reactive Python-based UI directly with a REST API backend, using PostgreSQL for persistence. The stack leverages modern async patterns throughout.
+SinaptrixOne is a unified FastAPI + NiceGUI application that integrates a reactive Python-based UI directly with a REST API backend, using PostgreSQL for persistence. The stack leverages modern async patterns throughout.
 
 ## Architecture
 

@@ -3,7 +3,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, date
 from sqlalchemy import select, or_, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.models.user import User
+from src.models.auth.user import User
 
 
 class UserSearchRepository:

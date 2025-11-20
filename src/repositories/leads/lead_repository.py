@@ -3,7 +3,7 @@ from typing import List, Dict
 from datetime import datetime
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.models.lead import Lead
+from src.models.leads.lead import Lead
 from src.models.enums import LeadStatus
 from src.repositories.base import BaseRepository
 

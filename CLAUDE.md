@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SinaptrixTwo is a FastAPI + NiceGUI application with PostgreSQL, using a clean layered architecture. The application combines backend API capabilities (FastAPI) with an integrated web UI (NiceGUI) in a single unified application.
+SinaptrixOne is a FastAPI + NiceGUI application with PostgreSQL, using a clean layered architecture. The application combines backend API capabilities (FastAPI) with an integrated web UI (NiceGUI) in a single unified application.
 
 **Tech Stack:**
 - Python 3.11
